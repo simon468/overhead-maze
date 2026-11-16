@@ -45,8 +45,9 @@ function play() {
   const ink = pixels.getContext('2d');
   const sparks = [];
   let burstStart;
+  let intro = 'welcome';
   function startBurst() {
-    const origin = beacon.getWorldPosition(new THREE.Vector3()).project(camera);
+    const origin = intro === 'burst' ? new THREE.Vector3() : beacon.getWorldPosition(new THREE.Vector3()).project(camera);
     const colors = ['#ff47ce', '#ffb1ec', '#50fff0', '#edffff'];
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     for (let i = 0; i < (reduced ? 48 : 210); i++) {
@@ -68,9 +69,28 @@ function play() {
     if (age >= 1.25) {
       burstStart = undefined;
       sparks.length = 0;
+      if (intro === 'burst') {
+        intro = 'playing';
+        document.querySelector('footer').inert = false;
+        canvas.focus({preventScroll:true});
+        return;
+      }
       el('win').hidden = false;
       el('next').focus();
       return;
+    }
+    if (intro === 'burst') {
+      // Break the welcome backdrop into receding square tiles, revealing the maze underneath.
+      const tile = 10;
+      ink.fillStyle = '#111114';
+      for (let row=0; row<pixels.height; row+=tile) {
+        for (let col=0; col<pixels.width; col+=tile) {
+          const radius = Math.hypot(col/pixels.width-.5,row/pixels.height-.5);
+          const width = Math.ceil(tile * THREE.MathUtils.clamp(1+radius*2-age*3.5,0,1));
+          const inset = (tile-width)/2;
+          ink.fillRect(col+inset,row+inset,width,width);
+        }
+      }
     }
     const span = Math.min(pixels.width, pixels.height);
     const travel = 1 - Math.exp(-3 * age);
@@ -89,6 +109,7 @@ function play() {
   const boostSeconds = 2;
   let heldSeconds = 0;
   function press(control, direction) {
+    if (intro !== 'playing') return;
     if (!held.size) heldSeconds = 0;
     held.set(control, direction);
   }
@@ -161,7 +182,7 @@ function play() {
   function drawTrail(now) {
     while (marks.length && now-marks[0].time>=trailLife) marks.shift();
     const prev=marks[marks.length-1];
-    if (!won && overviewStart===undefined && (!prev || Math.hypot(x-prev.x,z-prev.z)>=.24)) {
+    if (!won && intro==='playing' && (!prev || Math.hypot(x-prev.x,z-prev.z)>=.24)) {
       marks.push({x,z,time:now});
     }
     trail.count=marks.length;
@@ -230,7 +251,7 @@ function play() {
     return target;
   }
   function move(seconds) {
-    if (won || overviewStart !== undefined || !held.size) return;
+    if (intro !== 'playing' || won || !held.size) return;
     const active = new Set(held.values());
     const dx = Number(active.has('right')) - Number(active.has('left'));
     const dz = Number(active.has('down')) - Number(active.has('up'));
@@ -242,15 +263,16 @@ function play() {
     z = advance(z, x, dz * distance, false);
     if (startedAt === undefined && (x !== oldX || z !== oldZ)) startedAt = performance.now();
     const found = pickups.children.find(item => item.visible && Math.hypot(x-item.position.x,z-item.position.z)<.42);
-    if (found) {
+    if (found && overviewStart === undefined) {
       found.visible=false;
       overviewStart=performance.now();
-      heldSeconds=0;
     }
     if (Math.hypot(x - (size - 2), z - (size - 2)) < 0.42) {
       won = true;
       held.clear();
       el('score').textContent = 'Maze ' + stage + ' completed in ' + updateTimer(performance.now()) + '.';
+      overviewStart=undefined; el('overview').hidden=true;
+      frameCamera(performance.now());
       startBurst();
     }
   }
@@ -281,6 +303,14 @@ function play() {
       }
     };
   });
+  canvas.tabIndex = -1;
+  el('start').onclick = () => {
+    if (intro !== 'welcome') return;
+    intro = 'burst';
+    el('welcome').hidden = true;
+    startBurst();
+    drawBurst(burstStart);
+  };
   el('restart').onclick=restart; el('next').onclick=()=>{stage++;newMaze();};
   newMaze(); new ResizeObserver(resize).observe(canvas.parentElement);
   renderer.setAnimationLoop(t=>{
