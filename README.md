@@ -1,4 +1,4 @@
-# Mosslight Maze
+# A Maze, A Maze, A Maze
 
 Open dist/index.html in a WebGL-capable browser. Three.js r160 and its MIT license are bundled, so the game also works offline.
 
