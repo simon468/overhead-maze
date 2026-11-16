@@ -40,6 +40,17 @@ function play() {
         ctx.fillStyle='#131315'; ctx.fillRect(0,0,canvas.width,canvas.height);
         ctx.setTransform(scale,0,0,scale,-left*scale,-top*scale);
         ctx.fillStyle='#56565b'; ctx.fillRect(-.5,-.5,size,size);
+        for (const layer of starLayers) {
+          ctx.save();
+          ctx.translate(layer.plane.position.x - layer.offsetX, layer.plane.position.z - layer.offsetZ);
+          ctx.scale(starTileSize / layer.tile.width, starTileSize / layer.tile.height);
+          ctx.fillStyle = layer.pattern ??= ctx.createPattern(layer.tile, 'repeat');
+          const tileScale = layer.tile.width / starTileSize;
+          ctx.fillRect((left-layer.plane.position.x+layer.offsetX)*tileScale,
+            (top-layer.plane.position.z+layer.offsetZ)*tileScale,
+            canvas.width/scale*tileScale, canvas.height/scale*tileScale);
+          ctx.restore();
+        }
         ctx.fillStyle='#27272b';
         grid.forEach((row,r)=>row.forEach((wall,c)=>{if(wall)ctx.fillRect(c-.5,r-.5,1,1);}));
         const halo=ctx.createRadialGradient(x,z,0,x,z,2.5);
@@ -76,6 +87,54 @@ function play() {
     scene.add(item); return item;
   }
   const foundation=mesh(new THREE.BoxGeometry(1,.4,1),0x626267);
+  // Paint each repeatable star tile once. Both renderers use the same artwork.
+  const starTileSize = 12;
+  const starSpan = 768;
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  function makeStarLayer(rate, count, tint, radius) {
+    const tile = document.createElement('canvas');
+    tile.width = tile.height = 512;
+    const brush = tile.getContext('2d', {willReadFrequently:true});
+    for (let i = 0; i < count; i++) {
+      const px = 5 + Math.random()*502, py = 5 + Math.random()*502;
+      const r = radius*(.65 + Math.random()*.55);
+      brush.fillStyle = tint;
+      brush.globalAlpha = .18;
+      brush.beginPath(); brush.arc(px,py,r*2.4,0,2*Math.PI); brush.fill();
+      brush.globalAlpha = 1;
+      brush.beginPath(); brush.arc(px,py,r,0,2*Math.PI); brush.fill();
+      if (rate > .5 && i%3 === 0) {
+        brush.fillRect(px-r*2.4,py-.45,r*4.8,.9);
+        brush.fillRect(px-.45,py-r*2.4,.9,r*4.8);
+      }
+    }
+    const texture = new THREE.CanvasTexture(tile);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.setScalar(starSpan/starTileSize);
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(starSpan,starSpan),
+      new THREE.MeshBasicMaterial({map:texture,transparent:true,depthWrite:false}));
+    plane.rotation.x = -Math.PI/2;
+    plane.position.y = .004;
+    plane.renderOrder = -2;
+    scene.add(plane);
+    return {rate,tile,texture,plane,offsetX:0,offsetZ:0};
+  }
+  const starLayers = [
+    makeStarLayer(.15,170,'#778db9',.75),
+    makeStarLayer(.37,85,'#b794ff',1.1),
+    makeStarLayer(.67,44,'#75e4ff',1.5)
+  ];
+  function positionStars() {
+    for (const layer of starLayers) {
+      const rate = reducedMotion.matches ? 0 : layer.rate;
+      layer.offsetX = x*rate;
+      layer.offsetZ = z*rate;
+      layer.plane.position.x = camera.position.x;
+      layer.plane.position.z = camera.position.z-10;
+      layer.texture.offset.set(layer.offsetX/starTileSize,-layer.offsetZ/starTileSize);
+    }
+  }
   const wallShape=new THREE.BoxGeometry(1,.67,1);
   const wallMaterial=new THREE.MeshStandardMaterial({color:0xffffff});
   const actor=mesh(new THREE.OctahedronGeometry(.39),0xadffff,0x00d8da);
@@ -371,6 +430,7 @@ function play() {
     lanternLight.position.set(x, 0.85, z);
     drawBurst(t);
     actor.rotation.y=t/750; beacon.rotation.y=-t/650;
+    positionStars();
     renderer.render(scene,camera);
   });
 }
