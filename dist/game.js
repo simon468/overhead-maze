@@ -39,6 +39,10 @@ function play() {
   ring.rotation.x=-Math.PI/2;
   const beacon=mesh(new THREE.OctahedronGeometry(.19),0xb5ffdf,0x308e66);
   let stage=1,size,grid,walls,x,z,moves,won;
+  const held = new Map();
+  const radius = 0.35;
+  const speed = 3.2;
+  let lastFrame;
   function resize() {
     const {width,height}=canvas.getBoundingClientRect();
     const aspect=width/height, span=(size+1.5)/2;
@@ -47,6 +51,7 @@ function play() {
     camera.updateProjectionMatrix(); renderer.setSize(width,height,false);
   }
   function restart() {
+    held.clear();
     x=z=1; moves=0; won=false; actor.position.set(x,.5,z);
     el('moves').textContent='0 moves'; el('win').hidden=true;
   }
@@ -68,26 +73,73 @@ function play() {
     ring.position.set(size-2,.09,size-2); beacon.position.set(size-2,.42,size-2);
     el('level').textContent='Maze '+stage; restart(); resize();
   }
-  function move(dir) {
-    if(won)return;
-    const [dx,dz]=directions[dir];
-    if(grid[z+dz][x+dx])return;
-    x+=dx; z+=dz; moves++;
-    el('moves').textContent=moves+(moves===1?' move':' moves');
-    if(x===size-2 && z===size-2){
-      won=true; el('score').textContent='Maze '+stage+' completed in '+moves+' moves.';
-      el('win').hidden=false; el('next').focus();
+  // Check the leading edge against every wall touched by the lantern's width.
+  function advance(position, across, delta, horizontal) {
+    if (!delta) return position;
+    const sign = Math.sign(delta);
+    const target = position + delta;
+    const ahead = Math.round(target + sign * radius);
+    for (let i = Math.round(across - radius + 1e-8); i <= Math.round(across + radius - 1e-8); i++) {
+      if (horizontal ? grid[i][ahead] : grid[ahead][i]) {
+        return ahead - sign * (0.5 + radius);
+      }
+    }
+    return target;
+  }
+  function move(seconds) {
+    if (won || !held.size) return;
+    const active = new Set(held.values());
+    const dx = Number(active.has('right')) - Number(active.has('left'));
+    const dz = Number(active.has('down')) - Number(active.has('up'));
+    const distance = seconds * speed / (Math.hypot(dx, dz) || 1);
+    const oldCol = Math.round(x), oldRow = Math.round(z);
+    x = advance(x, z, dx * distance, true);
+    z = advance(z, x, dz * distance, false);
+    const col = Math.round(x), row = Math.round(z);
+    if (col !== oldCol || row !== oldRow) {
+      moves++;
+      el('moves').textContent = moves + (moves === 1 ? ' move' : ' moves');
+    }
+    if (Math.hypot(x - (size - 2), z - (size - 2)) < 0.42) {
+      won = true;
+      held.clear();
+      el('score').textContent = 'Maze ' + stage + ' completed in ' + moves + ' moves.';
+      el('win').hidden = false;
+      el('next').focus();
     }
   }
-  const keys={arrowleft:'left',a:'left',arrowright:'right',d:'right',arrowup:'up',w:'up',arrowdown:'down',s:'down'};
-  window.addEventListener('keydown',event=>{
-    const dir=keys[event.key.toLowerCase()];
-    if(dir && !event.altKey && !event.ctrlKey && !event.metaKey){event.preventDefault();move(dir);}
+  const keys = {arrowleft:'left',a:'left',arrowright:'right',d:'right',arrowup:'up',w:'up',arrowdown:'down',s:'down'};
+  window.addEventListener('keydown', event => {
+    const key = event.key.toLowerCase();
+    if (keys[key] && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      if (!event.repeat) held.set(key, keys[key]);
+    }
   });
-  document.querySelectorAll('[data-dir]').forEach(btn=>btn.onclick=()=>move(btn.dataset.dir));
+  window.addEventListener('keyup', event => held.delete(event.key.toLowerCase()));
+  window.addEventListener('blur', () => held.clear());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) held.clear(); });
+  document.querySelectorAll('[data-dir]').forEach(button => {
+    button.style.touchAction = 'none';
+    button.onpointerdown = event => {
+      if (event.button !== 0) return;
+      button.setPointerCapture(event.pointerId);
+      held.set(event.pointerId, button.dataset.dir);
+    };
+    button.onlostpointercapture = button.onpointerup = button.onpointercancel = event => held.delete(event.pointerId);
+    button.onclick = event => {
+      if (event.detail === 0) {
+        held.set('activation', button.dataset.dir);
+        move(0.05);
+        held.delete('activation');
+      }
+    };
+  });
   el('restart').onclick=restart; el('next').onclick=()=>{stage++;newMaze();};
   newMaze(); new ResizeObserver(resize).observe(canvas.parentElement);
   renderer.setAnimationLoop(t=>{
+    move(Math.min((t - (lastFrame ?? t)) / 1000, 0.05));
+    lastFrame = t;
     actor.position.set(x,.48+.04*Math.sin(t/230),z);
     actor.rotation.y=t/750; beacon.rotation.y=-t/650;
     renderer.render(scene,camera);
