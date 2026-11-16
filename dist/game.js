@@ -93,19 +93,93 @@ function play() {
     held.set(control, direction);
   }
   let lastFrame;
+  let aspect = 1;
+  let overviewStart;
+  const overviewMs = 5000;
+  const pickups = new THREE.Group();
+  const pickupShape = new THREE.TorusGeometry(.31,.09,6,4);
+  const pickupMaterial = new THREE.MeshBasicMaterial({color:0xc8ff36});
+  scene.add(pickups);
+  function placePickups() {
+    pickups.clear();
+    const ends = [];
+    for (let row=1; row<size-1; row++) {
+      for (let col=1; col<size-1; col++) {
+        if (grid[row][col] || (row===1 && col===1) || (row===size-2 && col===size-2)) continue;
+        const exits = Object.values(directions).filter(([dx,dz]) => !grid[row+dz][col+dx]);
+        if (exits.length===1) ends.push([col,row]);
+      }
+    }
+    const count = Math.ceil(ends.length/4);
+    for (let i=0; i<count; i++) {
+      const [col,row] = ends.splice(Math.floor(Math.random()*ends.length),1)[0];
+      const item = new THREE.Mesh(pickupShape,pickupMaterial);
+      item.position.set(col,.38,row);
+      item.rotation.x = -Math.PI/2;
+      pickups.add(item);
+    }
+  }
+  function frameCamera(now) {
+    let blend = 0;
+    if (overviewStart !== undefined) {
+      const elapsed = now - overviewStart;
+      if (elapsed >= overviewMs) {
+        if (startedAt !== undefined) startedAt += overviewMs;
+        overviewStart = undefined;
+        el('overview').hidden = true;
+      } else {
+        const ramp = THREE.MathUtils.clamp(Math.min(elapsed, overviewMs-elapsed)/800,0,1);
+        blend = ramp*ramp*(3-2*ramp);
+        el('overview').hidden = false;
+        el('overview').textContent = 'Map view · Timer paused · ' + Math.ceil((overviewMs-elapsed)/1000) + 's';
+      }
+    }
+    const span = THREE.MathUtils.lerp(5.4,(size+1.5)/2,blend);
+    const halfW = span*Math.max(1,aspect), halfH = span*Math.max(1,1/aspect);
+    const mid = (size-1)/2;
+    const follow = (v,half) => half >= mid ? mid : THREE.MathUtils.clamp(v,half-.5,size-.5-half);
+    const cx = THREE.MathUtils.lerp(follow(x,halfW),mid,blend);
+    const cz = THREE.MathUtils.lerp(follow(z,halfH*1.04),mid,blend);
+    camera.position.set(cx,35,cz+10); camera.lookAt(cx,0,cz);
+    camera.left=-halfW; camera.right=halfW; camera.top=halfH; camera.bottom=-halfH;
+    camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+  }
   function resize() {
     const {width,height}=canvas.getBoundingClientRect();
-    const aspect=width/height, span=(size+1.5)/2;
-    pixels.width = Math.max(1, Math.round(width / 3));
-    pixels.height = Math.max(1, Math.round(height / 3));
-    camera.left=-span*Math.max(1,aspect); camera.right=-camera.left;
-    camera.top=span*Math.max(1,1/aspect); camera.bottom=-camera.top;
-    camera.updateProjectionMatrix(); renderer.setSize(width,height,false);
+    aspect=width/height;
+    pixels.width=Math.max(1,Math.round(width/3)); pixels.height=Math.max(1,Math.round(height/3));
+    renderer.setSize(width,height,false); frameCamera(performance.now());
+  }
+  const trailLife = 25000;
+  const marks = [];
+  const trail = new THREE.InstancedMesh(new THREE.CircleGeometry(.11,8),
+    new THREE.MeshBasicMaterial({color:0x48cfcf,transparent:true,opacity:.72,blending:THREE.AdditiveBlending,depthWrite:false}),1024);
+  trail.count=0; trail.frustumCulled=false; scene.add(trail);
+  const stamp = new THREE.Object3D();
+  const trailTint = new THREE.Color();
+  stamp.rotation.x=-Math.PI/2;
+  function drawTrail(now) {
+    while (marks.length && now-marks[0].time>=trailLife) marks.shift();
+    const prev=marks[marks.length-1];
+    if (!won && overviewStart===undefined && (!prev || Math.hypot(x-prev.x,z-prev.z)>=.24)) {
+      marks.push({x,z,time:now});
+    }
+    trail.count=marks.length;
+    marks.forEach((mark,i)=>{
+      stamp.position.set(mark.x,.015,mark.z);
+      const strength=1-(now-mark.time)/trailLife;
+      stamp.scale.setScalar(.45+.55*strength);
+      trail.setColorAt(i,trailTint.setRGB(strength,strength,strength));
+      stamp.updateMatrix();
+      trail.setMatrixAt(i,stamp.matrix);
+    });
+    trail.instanceMatrix.needsUpdate=true;
+    if (trail.instanceColor) trail.instanceColor.needsUpdate=true;
   }
   let startedAt;
   let displayedSeconds;
   function updateTimer(now) {
-    const seconds = startedAt === undefined ? 0 : Math.floor((now - startedAt) / 1000);
+    const seconds = startedAt === undefined ? 0 : Math.floor(((overviewStart ?? now) - startedAt) / 1000);
     const time = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
     if (seconds !== displayedSeconds) {
       displayedSeconds = seconds;
@@ -115,6 +189,9 @@ function play() {
   }
   function restart() {
     held.clear();
+    overviewStart = undefined; el('overview').hidden = true;
+    pickups.children.forEach(item => item.visible=true);
+    marks.length=0; trail.count=0;
     burstStart = undefined;
     sparks.length = 0;
     ink.clearRect(0, 0, pixels.width, pixels.height);
@@ -122,7 +199,7 @@ function play() {
     updateTimer(performance.now()); el('win').hidden=true;
   }
   function newMaze() {
-    size=Math.min(9+stage*2,25); grid=carve(size);
+    size=2*Math.round((Math.min(9+stage*2,25)*Math.sqrt(10)-1)/2)+1; grid=carve(size); placePickups();
     if(walls){scene.remove(walls); walls.dispose();}
     const count=grid.flat().reduce((a,b)=>a+b,0);
     walls=new THREE.InstancedMesh(wallShape,wallMaterial,count);
@@ -153,7 +230,7 @@ function play() {
     return target;
   }
   function move(seconds) {
-    if (won || !held.size) return;
+    if (won || overviewStart !== undefined || !held.size) return;
     const active = new Set(held.values());
     const dx = Number(active.has('right')) - Number(active.has('left'));
     const dz = Number(active.has('down')) - Number(active.has('up'));
@@ -164,6 +241,12 @@ function play() {
     x = advance(x, z, dx * distance, true);
     z = advance(z, x, dz * distance, false);
     if (startedAt === undefined && (x !== oldX || z !== oldZ)) startedAt = performance.now();
+    const found = pickups.children.find(item => item.visible && Math.hypot(x-item.position.x,z-item.position.z)<.42);
+    if (found) {
+      found.visible=false;
+      overviewStart=performance.now();
+      heldSeconds=0;
+    }
     if (Math.hypot(x - (size - 2), z - (size - 2)) < 0.42) {
       won = true;
       held.clear();
@@ -203,7 +286,9 @@ function play() {
   renderer.setAnimationLoop(t=>{
     move(Math.min((t - (lastFrame ?? t)) / 1000, 0.05));
     lastFrame = t;
-    if (!won) updateTimer(performance.now());
+    const now=performance.now();
+    frameCamera(now); drawTrail(now);
+    if (!won) updateTimer(now);
     actor.position.set(x,.48+.04*Math.sin(t/230),z);
     lanternLight.position.set(x, 0.85, z);
     drawBurst(t);
