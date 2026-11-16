@@ -82,10 +82,10 @@ function play() {
       ink.fillRect(Math.round(px), Math.round(py), width, width);
     }
   }
-  let stage=1,size,grid,walls,x,z,moves,won;
+  let stage=1,size,grid,walls,x,z,won;
   const held = new Map();
   const radius = 0.35;
-  const baseSpeed = 3.6;
+  const baseSpeed = 4.32;
   const boostSeconds = 2;
   let heldSeconds = 0;
   function press(control, direction) {
@@ -102,13 +102,24 @@ function play() {
     camera.top=span*Math.max(1,1/aspect); camera.bottom=-camera.top;
     camera.updateProjectionMatrix(); renderer.setSize(width,height,false);
   }
+  let startedAt;
+  let displayedSeconds;
+  function updateTimer(now) {
+    const seconds = startedAt === undefined ? 0 : Math.floor((now - startedAt) / 1000);
+    const time = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+    if (seconds !== displayedSeconds) {
+      displayedSeconds = seconds;
+      el('timer').textContent = 'Time ' + time;
+    }
+    return time;
+  }
   function restart() {
     held.clear();
     burstStart = undefined;
     sparks.length = 0;
     ink.clearRect(0, 0, pixels.width, pixels.height);
-    x=z=1; moves=0; won=false; actor.position.set(x,.5,z);
-    el('moves').textContent='0 moves'; el('win').hidden=true;
+    x=z=1; startedAt=undefined; won=false; actor.position.set(x,.5,z);
+    updateTimer(performance.now()); el('win').hidden=true;
   }
   function newMaze() {
     size=Math.min(9+stage*2,25); grid=carve(size);
@@ -149,18 +160,14 @@ function play() {
     heldSeconds = Math.min(boostSeconds, heldSeconds + seconds);
     const speed = baseSpeed * (1 + 0.5 * heldSeconds / boostSeconds);
     const distance = seconds * speed / (Math.hypot(dx, dz) || 1);
-    const oldCol = Math.round(x), oldRow = Math.round(z);
+    const oldX = x, oldZ = z;
     x = advance(x, z, dx * distance, true);
     z = advance(z, x, dz * distance, false);
-    const col = Math.round(x), row = Math.round(z);
-    if (col !== oldCol || row !== oldRow) {
-      moves++;
-      el('moves').textContent = moves + (moves === 1 ? ' move' : ' moves');
-    }
+    if (startedAt === undefined && (x !== oldX || z !== oldZ)) startedAt = performance.now();
     if (Math.hypot(x - (size - 2), z - (size - 2)) < 0.42) {
       won = true;
       held.clear();
-      el('score').textContent = 'Maze ' + stage + ' completed in ' + moves + ' moves.';
+      el('score').textContent = 'Maze ' + stage + ' completed in ' + updateTimer(performance.now()) + '.';
       startBurst();
     }
   }
@@ -196,6 +203,7 @@ function play() {
   renderer.setAnimationLoop(t=>{
     move(Math.min((t - (lastFrame ?? t)) / 1000, 0.05));
     lastFrame = t;
+    if (!won) updateTimer(performance.now());
     actor.position.set(x,.48+.04*Math.sin(t/230),z);
     lanternLight.position.set(x, 0.85, z);
     drawBurst(t);
