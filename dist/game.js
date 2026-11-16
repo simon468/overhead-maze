@@ -22,22 +22,66 @@ function play() {
   const renderer = new THREE.WebGLRenderer({canvas,antialias:true});
   renderer.setPixelRatio(Math.min(devicePixelRatio,2));
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x233630);
+  scene.background = new THREE.Color(0x131315);
   const camera = new THREE.OrthographicCamera(-10,10,10,-10,.1,120);
-  scene.add(new THREE.HemisphereLight(0xfff5ce,0x678b79,1.85));
-  const sun = new THREE.DirectionalLight(0xffe6ad,2.3);
+  scene.add(new THREE.HemisphereLight(0xffffff,0x828288,0.9));
+  const sun = new THREE.DirectionalLight(0xffffff,1.1);
   sun.position.set(-8,18,7); scene.add(sun);
   function mesh(geometry,color,emission=0) {
     const item=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color,emissive:emission,flatShading:true}));
     scene.add(item); return item;
   }
-  const foundation=mesh(new THREE.BoxGeometry(1,.4,1),0x9e8863);
+  const foundation=mesh(new THREE.BoxGeometry(1,.4,1),0x626267);
   const wallShape=new THREE.BoxGeometry(1,.67,1);
   const wallMaterial=new THREE.MeshStandardMaterial({color:0xffffff});
-  const actor=mesh(new THREE.OctahedronGeometry(.39),0xffbd52,0x874009);
-  const ring=mesh(new THREE.TorusGeometry(.32,.075,8,32),0x83ffbd,0x27895b);
+  const actor=mesh(new THREE.OctahedronGeometry(.39),0xadffff,0x00d8da);
+  const ring=mesh(new THREE.TorusGeometry(.32,.075,8,32),0xff99e8,0xff15b2);
   ring.rotation.x=-Math.PI/2;
-  const beacon=mesh(new THREE.OctahedronGeometry(.19),0xb5ffdf,0x308e66);
+  const beacon=mesh(new THREE.OctahedronGeometry(.19),0xffc0f4,0xff27c1);
+  const lanternLight = new THREE.PointLight(0x12fff4, 20, 4.3);
+  const goalLight = new THREE.PointLight(0xff28cb, 7, 2.5);
+  scene.add(lanternLight, goalLight);
+  const pixels = el('pixels');
+  const ink = pixels.getContext('2d');
+  const sparks = [];
+  let burstStart;
+  function startBurst() {
+    const origin = beacon.getWorldPosition(new THREE.Vector3()).project(camera);
+    const colors = ['#ff47ce', '#ffb1ec', '#50fff0', '#edffff'];
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    for (let i = 0; i < (reduced ? 48 : 210); i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = (0.08 + Math.random() * 0.57) * (reduced ? 0.4 : 1);
+      sparks.push({
+        x: (origin.x + 1) / 2, y: (1 - origin.y) / 2,
+        vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+        width: 1 + Math.floor(Math.random() * 4),
+        color: colors[i % colors.length]
+      });
+    }
+    burstStart = performance.now();
+  }
+  function drawBurst(now) {
+    if (burstStart === undefined) return;
+    const age = Math.max(0, (now - burstStart) / 1000);
+    ink.clearRect(0, 0, pixels.width, pixels.height);
+    if (age >= 1.25) {
+      burstStart = undefined;
+      sparks.length = 0;
+      el('win').hidden = false;
+      el('next').focus();
+      return;
+    }
+    const span = Math.min(pixels.width, pixels.height);
+    const travel = 1 - Math.exp(-3 * age);
+    for (const spark of sparks) {
+      ink.fillStyle = spark.color;
+      const px = spark.x * pixels.width + spark.vx * span * travel;
+      const py = spark.y * pixels.height + (spark.vy * travel + 0.12 * age * age) * span;
+      const width = Math.ceil(spark.width * (1 - age / 1.25));
+      ink.fillRect(Math.round(px), Math.round(py), width, width);
+    }
+  }
   let stage=1,size,grid,walls,x,z,moves,won;
   const held = new Map();
   const radius = 0.35;
@@ -52,12 +96,17 @@ function play() {
   function resize() {
     const {width,height}=canvas.getBoundingClientRect();
     const aspect=width/height, span=(size+1.5)/2;
+    pixels.width = Math.max(1, Math.round(width / 3));
+    pixels.height = Math.max(1, Math.round(height / 3));
     camera.left=-span*Math.max(1,aspect); camera.right=-camera.left;
     camera.top=span*Math.max(1,1/aspect); camera.bottom=-camera.top;
     camera.updateProjectionMatrix(); renderer.setSize(width,height,false);
   }
   function restart() {
     held.clear();
+    burstStart = undefined;
+    sparks.length = 0;
+    ink.clearRect(0, 0, pixels.width, pixels.height);
     x=z=1; moves=0; won=false; actor.position.set(x,.5,z);
     el('moves').textContent='0 moves'; el('win').hidden=true;
   }
@@ -70,13 +119,13 @@ function play() {
     grid.forEach((row,rz)=>row.forEach((wall,rx)=>{
       if(!wall)return;
       walls.setMatrixAt(index,new THREE.Matrix4().makeTranslation(rx,.335,rz));
-      walls.setColorAt(index++,new THREE.Color([0x436a51,0x496e54,0x53765a][Math.floor(Math.random()*3)]));
+      walls.setColorAt(index++,new THREE.Color([0x303035,0x333338,0x36363a][Math.floor(Math.random()*3)]));
     }));
     scene.add(walls);
     const mid=(size-1)/2;
     foundation.position.set(mid,-.2,mid); foundation.scale.set(size,1,size);
     camera.position.set(mid,35,mid+10); camera.lookAt(mid,0,mid);
-    ring.position.set(size-2,.09,size-2); beacon.position.set(size-2,.42,size-2);
+    goalLight.position.set(size-2, 0.8, size-2); ring.position.set(size-2,.09,size-2); beacon.position.set(size-2,.42,size-2);
     el('level').textContent='Maze '+stage; restart(); resize();
   }
   // Check the leading edge against every wall touched by the lantern's width.
@@ -112,8 +161,7 @@ function play() {
       won = true;
       held.clear();
       el('score').textContent = 'Maze ' + stage + ' completed in ' + moves + ' moves.';
-      el('win').hidden = false;
-      el('next').focus();
+      startBurst();
     }
   }
   const keys = {arrowleft:'left',a:'left',arrowright:'right',d:'right',arrowup:'up',w:'up',arrowdown:'down',s:'down'};
@@ -149,6 +197,8 @@ function play() {
     move(Math.min((t - (lastFrame ?? t)) / 1000, 0.05));
     lastFrame = t;
     actor.position.set(x,.48+.04*Math.sin(t/230),z);
+    lanternLight.position.set(x, 0.85, z);
+    drawBurst(t);
     actor.rotation.y=t/750; beacon.rotation.y=-t/650;
     renderer.render(scene,camera);
   });
