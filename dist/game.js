@@ -41,7 +41,13 @@ function play() {
   let stage=1,size,grid,walls,x,z,moves,won;
   const held = new Map();
   const radius = 0.35;
-  const speed = 3.2;
+  const baseSpeed = 3.6;
+  const boostSeconds = 2;
+  let heldSeconds = 0;
+  function press(control, direction) {
+    if (!held.size) heldSeconds = 0;
+    held.set(control, direction);
+  }
   let lastFrame;
   function resize() {
     const {width,height}=canvas.getBoundingClientRect();
@@ -91,6 +97,8 @@ function play() {
     const active = new Set(held.values());
     const dx = Number(active.has('right')) - Number(active.has('left'));
     const dz = Number(active.has('down')) - Number(active.has('up'));
+    heldSeconds = Math.min(boostSeconds, heldSeconds + seconds);
+    const speed = baseSpeed * (1 + 0.5 * heldSeconds / boostSeconds);
     const distance = seconds * speed / (Math.hypot(dx, dz) || 1);
     const oldCol = Math.round(x), oldRow = Math.round(z);
     x = advance(x, z, dx * distance, true);
@@ -113,7 +121,7 @@ function play() {
     const key = event.key.toLowerCase();
     if (keys[key] && !event.altKey && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
-      if (!event.repeat) held.set(key, keys[key]);
+      if (!event.repeat) press(key, keys[key]);
     }
   });
   window.addEventListener('keyup', event => held.delete(event.key.toLowerCase()));
@@ -124,12 +132,12 @@ function play() {
     button.onpointerdown = event => {
       if (event.button !== 0) return;
       button.setPointerCapture(event.pointerId);
-      held.set(event.pointerId, button.dataset.dir);
+      press(event.pointerId, button.dataset.dir);
     };
     button.onlostpointercapture = button.onpointerup = button.onpointercancel = event => held.delete(event.pointerId);
     button.onclick = event => {
       if (event.detail === 0) {
-        held.set('activation', button.dataset.dir);
+        press('activation', button.dataset.dir);
         move(0.05);
         held.delete('activation');
       }
