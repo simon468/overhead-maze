@@ -19,7 +19,51 @@ function carve(size) {
 }
 function play() {
   const canvas = document.querySelector('canvas');
-  const renderer = new THREE.WebGLRenderer({canvas,antialias:true});
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({canvas,antialias:true});
+  } catch (error) {
+    // Embedded browsers can disable WebGL. Keep the same game and input loop.
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw error;
+    renderer = {
+      setPixelRatio() {},
+      setSize(w,h) { canvas.width=Math.round(w); canvas.height=Math.round(h); },
+      setAnimationLoop(frame) {
+        const tick = t => { frame(t); requestAnimationFrame(tick); };
+        requestAnimationFrame(tick);
+      },
+      render() {
+        const scale=canvas.width/(camera.right-camera.left);
+        const left=camera.position.x+camera.left, top=camera.position.z-10-camera.top;
+        ctx.setTransform(1,0,0,1,0,0);
+        ctx.fillStyle='#131315'; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.setTransform(scale,0,0,scale,-left*scale,-top*scale);
+        ctx.fillStyle='#56565b'; ctx.fillRect(-.5,-.5,size,size);
+        ctx.fillStyle='#27272b';
+        grid.forEach((row,r)=>row.forEach((wall,c)=>{if(wall)ctx.fillRect(c-.5,r-.5,1,1);}));
+        const halo=ctx.createRadialGradient(x,z,0,x,z,2.5);
+        halo.addColorStop(0,'rgba(0,255,240,.65)'); halo.addColorStop(1,'rgba(0,255,240,0)');
+        ctx.fillStyle=halo; ctx.fillRect(x-2.5,z-2.5,5,5);
+        const now=performance.now();
+        ctx.fillStyle='#50dfd8';
+        for(const mark of marks) {
+          ctx.globalAlpha=Math.max(0,1-(now-mark.time)/trailLife)*.7;
+          ctx.fillRect(mark.x-.08,mark.z-.08,.16,.16);
+        }
+        ctx.globalAlpha=1;
+        function diamond(cx,cz,r,color) {
+          ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(cx,cz-r); ctx.lineTo(cx+r,cz);
+          ctx.lineTo(cx,cz+r); ctx.lineTo(cx-r,cz); ctx.closePath(); ctx.fill();
+        }
+        for(const item of pickups.children) if(item.visible) diamond(item.position.x,item.position.z,.3,'#c8ff36');
+        ctx.strokeStyle='#ff54d6'; ctx.lineWidth=.09; ctx.beginPath();
+        ctx.arc(size-2,size-2,.37,0,2*Math.PI); ctx.stroke();
+        diamond(size-2,size-2,.22,'#ffaff0'); diamond(x,z,.37,'#80fff9');
+        ctx.setTransform(1,0,0,1,0,0);
+      }
+    };
+  }
   renderer.setPixelRatio(Math.min(devicePixelRatio,2));
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x131315);
@@ -310,6 +354,10 @@ function play() {
     el('welcome').hidden = true;
     startBurst();
     drawBurst(burstStart);
+    // Finish the intro even when an embedded browser throttles animation frames.
+    setTimeout(() => {
+      if (intro === 'burst') drawBurst(burstStart + 1250);
+    }, 1250);
   };
   el('restart').onclick=restart; el('next').onclick=()=>{stage++;newMaze();};
   newMaze(); new ResizeObserver(resize).observe(canvas.parentElement);
